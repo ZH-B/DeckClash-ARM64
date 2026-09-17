@@ -27,6 +27,8 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -169,40 +171,89 @@ jobs:
             ${{ env.OUT2 }}
             SHA256SUMS.txt
 
+      - name: Write release notes
+        env:
+          ARCH: ${{ steps.ver.outputs.arch }}
+          NAME: ${{ steps.ver.outputs.name }}
+          UPSTREAM: ${{ steps.ver.outputs.upstream }}
+          CORE: ${{ steps.core.outputs.core_version }}
+          REPO: ${{ github.repository }}
+          OUT: ${{ env.OUT }}
+          OUT2: ${{ env.OUT2 }}
+        run: |
+          cat > RELEASE_NOTES.md <<EOF
+          基于上游 [DeckyClash](https://github.com/chenx-dust/DeckyClash) \`${UPSTREAM}\`，
+          内核 [mihomo](https://github.com/MetaCubeX/mihomo) \`${CORE}\` (${ARCH})。
+
+          ## 两个包，装哪个？
+
+          | 文件 | 插件名 | 适用于 |
+          | --- | --- | --- |
+          | \`${OUT}\` | \`Decky Clash ARM64\` | **新装用户（推荐）**，可与官方版共存 |
+          | \`${OUT2}\` | \`Decky Clash\` | 已装过官方版、想让设置和订阅延续的人（同名覆盖） |
+
+          > ⚠️ 两个包不要同时启用 —— 会抢同一组端口（默认 9090 / 50581）。
+
+          ## 为什么需要这个包
+
+          ARM64 机器上装官方包后，导入任何订阅都报 \`Invalid config\`：
+          官方版把内核下载地址写死成 \`mihomo-linux-amd64-*\`，在 ARM64 上装到的
+          x86-64 内核经 binfmt/FEX 模拟执行时，Go 运行时的 CPU 特征探测会 SIGSEGV，
+          于是 \`mihomo -t\` 崩溃 → \`check_config\` 返回 False → 插件报 Invalid config。
+          **订阅本身没问题。** 本包改两处：\`py_modules/upgrade.py\` 改为运行时架构探测、
+          \`bin/mihomo\` 换成官方 arm64 二进制。
+
+          ## 安装
+
+          Decky → 设置 → 通用 → 打开**开发者模式** → **开发者** → **从 ZIP 安装插件**
+          → 选上面的 ZIP（**不是 Source code**）。
+
+          装完自检（应打印 \`linux ${ARCH}\` 且退出码 0）：
+
+          \`\`\`sh
+          ~/homebrew/plugins/"${NAME}"/bin/mihomo -v
+          \`\`\`
+
+          打印 \`linux amd64\` 或直接段错误，说明装到官方包了。
+
+          更多排查看 [README](https://github.com/${REPO}#排查)。
+          EOF
+          echo "--- 发布说明预览 ---"
+          head -20 RELEASE_NOTES.md
+
       - name: Publish release
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            ${{ env.OUT }}
-            ${{ env.OUT2 }}
-            SHA256SUMS.txt
-          name: ${{ env.OUT }}
-          body: |
-            基于上游 [DeckyClash](https://github.com/chenx-dust/DeckyClash)
-            `${{ steps.ver.outputs.upstream }}`，内核
-            [mihomo](https://github.com/MetaCubeX/mihomo)
-            `${{ steps.core.outputs.core_version }}` (${{ steps.ver.outputs.arch }})。
-
-            **两个包，装哪个？**
-
-            | 文件 | 插件名 | 适用于 |
-            | --- | --- | --- |
-            | `${{ env.OUT }}` | `Decky Clash ARM64` | 新装用户（推荐）。可与 ARM64 上的官方版共存 |
-            | `${{ env.OUT2 }}` | `Decky Clash` | 已经装过官方版、想让设置和订阅延续的人（同名覆盖） |
-
-            > ⚠️ 两个包不要同时启用，会抢同一组端口（默认 9090 / 50581）。
-
-            **安装**：Decky → 设置 → 通用 → 打开开发者模式 → 开发者 → 从 ZIP 安装插件。
-
-            **装完请自检**（应打印 `linux ${{ steps.ver.outputs.arch }}` 且退出码 0）：
-
-            ```sh
-            ~/homebrew/plugins/"${{ steps.ver.outputs.name }}"/bin/mihomo -v
-            ```
-
-            如果这里打印的是 `linux amd64` 或直接段错误，说明装到官方包了。
-
-            更多排查看 [README](https://github.com/${{ github.repository }}#排查)。
-          draft: false
-          generate_release_notes: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          gh release create "${GITHUB_REF_NAME}" \
+            "$OUT" "$OUT2" SHA256SUMS.txt \
+            --title "$OUT" \
+            --notes-file RELEASE_NOTES.md \
+            --verify-tag \
+            > /tmp/rel.log 2>&1
+          rc=$?
+          if [ "$rc" -eq 0 ]; then
+            {
+              echo "## ✅ Release 发布成功"
+              echo
+              gh release view "${GITHUB_REF_NAME}" --json url -q .url
+            } >> "$GITHUB_STEP_SUMMARY"
+            cat /tmp/rel.log
+          else
+            {
+              echo "## ❌ Release 发布失败（exit $rc）"
+              echo
+              echo '```'
+              tail -40 /tmp/rel.log
+              echo '```'
+              echo
+              echo "仓库: \`${GITHUB_REPOSITORY}\`  ref: \`${GITHUB_REF}\`"
+              echo "提示: 若报 \`Resource not accessible by integration\` 或 403，"
+              echo "请在 Settings → Actions → General → Workflow permissions 里"
+              echo "选择 **Read and write permissions** 后重新运行。"
+            } >> "$GITHUB_STEP_SUMMARY"
+            cat /tmp/rel.log
+            exit "$rc"
+          fi
