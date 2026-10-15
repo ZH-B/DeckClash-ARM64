@@ -1,5 +1,27 @@
 # decky-clash-arm64
 
+> ## ⚠️ 已停止维护 —— 请改用上游官方包
+>
+> **上游 [DeckyClash v1.3.5](https://github.com/chenx-dust/DeckyClash/releases/tag/v1.3.5)（2026-09-28）
+> 已正式支持 ARM64**，并直接提供按架构分包的官方安装包：
+>
+> - `DeckyClash-full-linux-arm64.zip`
+> - `Installer-DeckyClash-linux-arm64.sh`
+>
+> **请直接使用上游发布，不要再使用本仓库构建的包。** 本仓库仅作存档保留。
+>
+> ---
+>
+> **历史背景**：v1.3.4 及更早版本把 mihomo 内核下载地址写死成
+> `mihomo-linux-amd64-{ver}.gz`（`upgrade.py`、`install.sh`），在 ARM64 上会装到
+> x86-64 内核；它经 `binfmt_misc` + FEX-Emu/qemu 模拟执行时，Go 运行时的 CPU
+> 特征探测（`klauspost/cpuid`）与包初始化（`gopacket/layers.init`）会 SIGSEGV，
+> 于是 `mihomo -t` 崩溃 → `check_config()` 返回 False → 导入订阅报 `Invalid config`。
+>
+> 上游在 `b0fa3ac8 feat: support arm64`（2026-08-23）中修复，思路与本仓库的补丁一致
+> —— 都是用 `platform.machine()` 映射出 `amd64` / `arm64` 再拼进下载地址。
+> 本仓库的存在意义已经消失。
+
 [DeckyClash](https://github.com/chenx-dust/DeckyClash)（Clash/Mihomo 的 Decky 插件）的
 **非官方 ARM64 打包版**，面向 [Armada OS](https://armadaos.dev/) 等 ARM64 掌机系统。
 
